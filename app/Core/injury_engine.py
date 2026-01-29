@@ -52,13 +52,16 @@ class InjuryEngine:
                 status.region = region
 
         # Severity detection
+        # RED takes absolute priority
         if any(t in text for t in self.RED_FLAG_TERMS):
             status.severity = "red"
+
         elif any(t in text for t in self.YELLOW_FLAG_TERMS):
             status.severity = "yellow"
-        else:
-            if status.region:
-                status.severity = "yellow"
+
+        elif status.region:
+            status.severity = "yellow"
+
 
         status.description = text
         return status
