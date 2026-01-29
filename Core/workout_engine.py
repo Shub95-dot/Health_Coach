@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
+from app.Core.injury_adaptation import InjuryAdaptationEngine
+
 
 GOALS = {"fat loss", "muscle gain", "weight gain", "endurance", "flexibility", "general health"}
 DURATIONS = {4, 8, 16, 24, 32}
@@ -545,6 +547,18 @@ class PlanGenerator:
         lines.append("- 3-5 of these sessions per week is a strong fat loss base when combined with nutrition and sleep.")
 
         return "\n".join(lines)
+    def _apply_injury_adaptation(self, exercises, profile):
+
+        if not profile:
+            return exercises
+
+        if not getattr(profile, "injury_region", None):
+            return exercises
+
+        region = profile.injury_region
+
+        return self.injury_adapter.modify_exercise_list(exercises, region)
+
 
 class NutritionGuidance:
     """Simple nutrition guidance based on profile and goal."""
