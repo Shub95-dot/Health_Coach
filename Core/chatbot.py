@@ -1,4 +1,3 @@
-# %%
 from Core.nlu import NLU
 from Core.memory import MemoryStore
 from Core.dialog import DIalogManager
@@ -40,5 +39,3 @@ if __name__ == "__main__":
             break
         reply = bot.process_message(user_id, msg)
         print(f"Coach: {reply}\n")
-
-
