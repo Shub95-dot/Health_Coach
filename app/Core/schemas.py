@@ -76,5 +76,10 @@ class NLUResult:
     slots: Dict[str, any] = field(default_factory=dict)
     safety_flags: List[str] = field(default_factory=list)
 
+@dataclass
+class InjuryStatus:
+    region: Optional[str] = None
+    severity: Optional[str] = None  # green / yellow / red
+    description: Optional[str] = None
 
 
