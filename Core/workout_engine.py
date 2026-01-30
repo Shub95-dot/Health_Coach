@@ -1,4 +1,3 @@
-# %%
 import json
 import os
 import re
@@ -7,7 +6,6 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from app.Core.injury_adaptation import InjuryAdaptationEngine
-
 
 GOALS = {"fat loss", "muscle gain", "weight gain", "endurance", "flexibility", "general health"}
 DURATIONS = {4, 8, 16, 24, 32}
@@ -241,6 +239,9 @@ class ProgramPlan:
 class PlanGenerator:
 
     def __init__(self, exercise_db = None):
+
+        self.injury_adapter = InjuryAdaptationEngine()
+
         self.exercise = exercise_db
 
     def generate_multiweek_plan(self, profile, params: Dict[str, Any]) -> str:
@@ -338,7 +339,8 @@ class PlanGenerator:
                     day_index=day_idx,
                     total_time=time_minutes,
                     experience=experience,
-                    location=location
+                    location=location,
+                    profile=profile
                 )
                 week.days.append(day)
             program.weeks.append(week)
@@ -436,6 +438,36 @@ class PlanGenerator:
             ]
 
         blocks["Strength"] = strength_exercises
+        # Apply injury adaptation
+        if getattr(profile, "injury_region", None):
+
+            names = [ex.name for ex in strength_exercises]
+
+            adapted_names = self._apply_injury_adaptation(names,profile)
+
+            adapted_strength = []
+
+            for ex in strength_exercises:
+                if ex.name in adapted_names:
+                    adapted_strength.append(ex)
+
+            # Add replacements if needed
+            if len(adapted_strength) < len(strength_exercises):
+                for new_name in adapted_names:
+                    if new_name not in [ex.name for ex in adapted_strength]:
+                        adapted_strength.append(
+                            ExercisePrescription(
+                                name=new_name,
+                                sets=3,
+                                reps="10-12",
+                                tempo="controlled",
+                                rest_seconds=60,
+                                notes="Selected as joint-friendly alternative."
+                            )
+                        )
+
+            blocks["Strength"] = adapted_strength
+
 
         if week_index <= 2:
             conditioning = [
@@ -547,6 +579,7 @@ class PlanGenerator:
         lines.append("- 3-5 of these sessions per week is a strong fat loss base when combined with nutrition and sleep.")
 
         return "\n".join(lines)
+    
     def _apply_injury_adaptation(self, exercises, profile):
 
         if not profile:
@@ -608,8 +641,3 @@ class SleepGuidance:
             lines.append("- Muscle recovery and strength gains happen at rest - sleep is non-negotiable.")
         
         return "\n".join(lines)
-
-# %%
-
-
-

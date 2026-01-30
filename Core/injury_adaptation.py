@@ -17,8 +17,12 @@ class InjuryAdaptationEngine:
 
         "knee": [
             "jump squat",
+            "jump",
+            "lunge",
+            "plyometric",
             "box jump",
             "running",
+            "squat",
             "deep squat",
             "heavy lunge"
         ],
