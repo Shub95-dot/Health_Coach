@@ -1,4 +1,15 @@
 # %%
+import sys
+
+sys.path.append(r"C:\Users\shiro\OneDrive\Desktop\new bot'\COACH")
+from app.Core.injury_adaptation import InjuryAdaptationEngine
+class TestProfile:
+    pass
+
+profile = TestProfile()
+
+
+# %%
 import json
 import os
 import re
@@ -6,6 +17,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
+from app.Core.injury_adaptation import InjuryAdaptationEngine
 
 GOALS = {"fat loss", "muscle gain", "weight gain", "endurance", "flexibility", "general health"}
 DURATIONS = {4, 8, 16, 24, 32}
@@ -239,6 +251,9 @@ class ProgramPlan:
 class PlanGenerator:
 
     def __init__(self, exercise_db = None):
+
+        self.injury_adapter = InjuryAdaptationEngine()
+
         self.exercise = exercise_db
 
     def generate_multiweek_plan(self, profile, params: Dict[str, Any]) -> str:
@@ -263,8 +278,10 @@ class PlanGenerator:
                 duration_weeks=duration_weeks,
                 experience=experience,
                 location=location,
-                time_minutes=time_minutes
-            )
+                time_minutes=time_minutes,
+                profile=profile
+                )   
+
             return program.to_text()
         
         return(
@@ -303,6 +320,7 @@ class PlanGenerator:
             experience: str,
             location: str,
             time_minutes: int,
+            profile
     ) -> ProgramPlan:
         
 
@@ -332,12 +350,13 @@ class PlanGenerator:
             week = WeekPlan(week_index=week_idx, theme=theme)
             for day_idx in range(1, sessions_per_week + 1):
                 day = self._build_fat_loss_day(
-                    week_index=week_idx,
-                    day_index=day_idx,
-                    total_time=time_minutes,
-                    experience=experience,
-                    location=location
-                )
+                        week_index=week_idx,
+                        day_index=day_idx,
+                        total_time=time_minutes,
+                        experience=experience,
+                        location=location,
+                        profile=profile
+                    )
                 week.days.append(day)
             program.weeks.append(week)
         return program
@@ -349,6 +368,7 @@ class PlanGenerator:
             total_time: int,
             experience: str,
             location: str,
+            profile
     ) -> DayPlan:
         
 
@@ -432,8 +452,42 @@ class PlanGenerator:
                     notes="Feel hamstrings load on the way down, no rounding.",
                 ),
             ]
+            
+        if getattr(profile, "injury_region", None):
+
+            original = strength_exercises
+
+            names = [ex.name for ex in original]
+
+            adapted_names = self.injury_adapter.modify_exercise_list(
+                names,
+                profile.injury_region
+            )
+
+            adapted_strength = []
+
+            for name in adapted_names:
+
+                match = next((ex for ex in original if ex.name == name), None)
+
+                if match:
+                    adapted_strength.append(match)
+                else:
+                    adapted_strength.append(
+                        ExercisePrescription(
+                            name=name,
+                            sets=3,
+                            reps="10-12",
+                            tempo="controlled",
+                            rest_seconds=60,
+                            notes="Auto-selected joint-friendly alternative."
+                        )
+                    )
+
+            strength_exercises = adapted_strength
 
         blocks["Strength"] = strength_exercises
+        
 
         if week_index <= 2:
             conditioning = [
@@ -545,6 +599,8 @@ class PlanGenerator:
         lines.append("- 3-5 of these sessions per week is a strong fat loss base when combined with nutrition and sleep.")
 
         return "\n".join(lines)
+    
+
 
 class NutritionGuidance:
     """Simple nutrition guidance based on profile and goal."""
@@ -594,6 +650,27 @@ class SleepGuidance:
             lines.append("- Muscle recovery and strength gains happen at rest - sleep is non-negotiable.")
         
         return "\n".join(lines)
+
+# %%
+profile.injury_region = "knee"
+profile.goal = "fat loss"
+profile.duration_weeks = 6
+profile.location = "home"
+profile.experience = "beginner"
+profile.time_minutes = 45
+
+
+# %%
+from app.Core.workout_engine import PlanGenerator
+
+plan = PlanGenerator()
+
+output = plan.generate_multiweek_plan(profile, {})
+
+print(output)
+profile.injury_region = "knee"
+
+
 
 # %%
 
