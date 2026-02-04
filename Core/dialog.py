@@ -1,24 +1,23 @@
-# %%
 from typing import List
 
+from injury_engine import InjuryEngine
 from schemas import (
     UserProfile,
     SessionState,
     GoalParams,
     NLUResult,
 )
-from injury_engine import InjuryEngine
-from workout_engine import PlanGenerator
 from exceptions import MedicalReferralRequired
+from workout_engine import PlanGenerator
 
 
 class DialogManager:
     """
-    Orchestrates high-level dialog:
-    - Reads NLUResult (intent + slots + safety flags)
-    - Updates SessionState + UserProfile
-    - Calls PlanGenerator to build programs
-    - Integrates InjuryEngine to set injury region + severity
+    Orchestrates high-level conversation:
+      - Uses NLUResult (intent, slots, safety_flags)
+      - Maintains SessionState.current_flow
+      - Calls PlanGenerator for multi-week plans
+      - Integrates InjuryEngine for injury region + severity
     """
 
     REQUIRED_PLAN_FIELDS = [
@@ -29,88 +28,97 @@ class DialogManager:
         "time_minutes",
     ]
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.planner = PlanGenerator()
         self.injury_engine = InjuryEngine()
 
     # ================= MAIN ENTRY =================
 
-    def handle(
-        self,
-        nlu_result: NLUResult,
-        profile: UserProfile,
-        session: SessionState,
-    ) -> str:
+    def handle(self, nlu_result: NLUResult, profile: UserProfile, session: SessionState) -> str:
         """
-        Main routing function.
+        Main routing method called by HealthWellnessChatbot.
         """
 
-        # ===== SAFETY FIRST (from NLU flags) =====
+        # ===== 1) SAFETY FROM NLU RED FLAGS =====
         if nlu_result.safety_flags:
-            # We don't need to be fancy here; orchestrator will catch this
             raise MedicalReferralRequired(
-                f"Safety flags detected: {', '.join(nlu_result.safety_flags)}"
+                f"Safety flags detected in your message ({', '.join(nlu_result.safety_flags)})."
             )
 
-        # ===== INJURY CLASSIFICATION (if injury mentioned) =====
+        # ===== 2) INJURY CLASSIFICATION (IF PRESENT) =====
         injury_status = None
-        if "injury" in nlu_result.slots:
-            injury_text = nlu_result.slots["injury"]
+        injury_text = nlu_result.slots.get("injury")
+
+        if injury_text:
             injury_status = self.injury_engine.classify(injury_text)
 
-            # Persist in profile
+            # Persist on profile
             profile.injury_status = injury_status
             profile.injury_region = injury_status.region
             profile.injury_severity = injury_status.severity
 
-            # HARD STOP for red injuries
-            if injury_status.severity == "red":
-                raise MedicalReferralRequired(
-                    "This may be a serious injury. Please consult a medical professional before training."
-                )
+        # Hard stop for "red" injuries detected by InjuryEngine
+        if injury_status and injury_status.severity == "red":
+            raise MedicalReferralRequired(
+                "This may be a serious injury (red-flag). "
+                "Please consult a medical professional before continuing training."
+            )
 
-        # ===== MERGE SLOTS INTO SESSION =====
+        # ===== 3) MERGE SLOTS INTO SESSION FEATURE PARAMS =====
+        # (We accumulate info over multiple turns.)
         for k, v in nlu_result.slots.items():
             session.feature_params[k] = v
 
-        intent = nlu_result.intent or "unknown"
+        intent = nlu_result.intent
 
-        # ===== ROUTING BY INTENT =====
+        # ===== 4) FLOW OVERRIDE: CONTINUE EXISTING FLOW ON UNKNOWN =====
+        # If NLU can't confidently assign a new intent, but we are already in a flow,
+        # treat the message as continuation of that flow instead of falling back to small talk.
+        if intent == "unknown" and session.current_flow:
+            intent = session.current_flow
+
+        # ===== 5) ROUTING BY INTENT =====
+
         if intent == "multi_week_plan":
+            session.current_flow = "multi_week_plan"
             return self._handle_multi_week_plan(profile, session)
+        
+        if intent == "quick_session":
+            session.current_flow = "quick_session"
+            return self._handle_quick_session(profile, session)
+
 
         if intent == "injury_assistance":
-            return self._handle_injury()
+            session.current_flow = "injury_assistance"
+            return self._handle_injury(profile, session)
 
         if intent == "pregnancy_modification":
-            return self._handle_pregnancy()
+            session.current_flow = "pregnancy_modification"
+            return self._handle_pregnancy(profile, session)
 
         if intent == "cycle_modification":
-            return self._handle_cycle()
+            session.current_flow = "cycle_modification"
+            return self._handle_cycle(profile, session)
 
-        # Fallback / small talk
-        return self._handle_small_talk()
+        # Fallback: generic “what do you want help with?”
+        session.current_flow = None
+        return self._handle_small_talk(profile, session)
 
     # ================= PLAN FLOW =================
 
-    def _handle_multi_week_plan(
-        self,
-        profile: UserProfile,
-        session: SessionState,
-    ) -> str:
+    def _handle_multi_week_plan(self, profile: UserProfile, session: SessionState) -> str:
         """
-        Build or continue the multi-week plan flow.
+        Build or continue building a multi-week plan request.
+        If required fields are missing, ask a targeted follow-up.
         """
-
         missing = self._missing_fields(session)
 
-        # Still missing required info → ask for next one
         if missing:
-            session.current_flow = "multi_week_plan"
-            next_field = missing[0]
-            return self._ask_for(next_field)
+            # Stay in this flow and ask for the next missing parameter
+            field = missing[0]
+            return self._ask_for(field)
 
-        # All required fields present → assemble params object
+        # All required fields present → construct GoalParams
         params = GoalParams(
             goal=session.feature_params["goal"],
             duration_weeks=int(session.feature_params["duration_weeks"]),
@@ -119,95 +127,133 @@ class DialogManager:
             time_minutes=int(session.feature_params["time_minutes"]),
         )
 
-        # Save into profile memory
+        # Persist into profile memory
         profile.goal = params.goal
         profile.duration_weeks = params.duration_weeks
         profile.experience = params.experience
         profile.location = params.location
         profile.time_minutes = params.time_minutes
 
-        # Call planner
-        plan_text = self.planner.generate_multiweek_plan(
-            profile=profile,
-            params=params.__dict__,  # planner expects dict
-        )
+        # If we have injury info on profile, PlanGenerator will adapt around it
+        plan_text = self.planner.generate_multiweek_plan(profile, params.__dict__)
 
-        # Reset session AFTER generating plan
+        # Reset flow after completing the plan
         session.current_flow = None
         session.feature_params.clear()
 
         return plan_text
+    
+    def _handle_quick_session(self, profile: UserProfile, session: SessionState) -> str:
+        """
+        Build a single quick workout session.
+        We use whatever slots we have; missing ones fall back to profile, then defaults.
+        """
+        # Merge what we know from session + profile
+        params = {
+            "goal": session.feature_params.get("goal") or getattr(profile, "goal", None) or "fat loss",
+            "time_minutes": int(session.feature_params.get("time_minutes") or getattr(profile, "time_minutes", 0) or 20),
+            "location": session.feature_params.get("location") or getattr(profile, "location", None) or "home",
+            "experience": session.feature_params.get("experience") or getattr(profile, "experience", None) or "beginner",
+        }
+
+        # Persist the last used quick-workout context onto profile (optional but useful)
+        profile.goal = params["goal"]
+        profile.time_minutes = params["time_minutes"]
+        profile.location = params["location"]
+        profile.experience = params["experience"]
+
+        # Ask PlanGenerator for a quick workout
+        workout_text = self.planner.generate_quick_workout(profile, params)
+
+        return workout_text
+
 
     # ================= SPECIAL FLOWS =================
 
-    def _handle_injury(self) -> str:
+    def _handle_injury(self, profile: UserProfile, session: SessionState) -> str:
+        """
+        Injury assistance entry or continuation.
+        We rely on profile.injury_region / injury_severity if available.
+        """
+        region = getattr(profile, "injury_region", None) or "the affected area"
+        severity = getattr(profile, "injury_severity", None)
+
+        severity_line = ""
+        if severity == "yellow":
+            severity_line = (
+                "This sounds like a yellow-flag issue – we’ll be conservative and avoid aggravating movements.\n"
+            )
+        elif severity == "green":
+            severity_line = (
+                "This currently looks like a lower-risk (green-flag) issue, but we’ll still keep things joint-friendly.\n"
+            )
+
         return (
-            "I can help you train safely around injuries.\n"
-            "Tell me:\n"
-            "- Which body part is injured?\n"
-            "- Pain level (1–10)?\n"
-            "- Was it diagnosed by a doctor, and what was the diagnosis?"
+            f"I’ve noted you have an issue around {region}.\n"
+            f"{severity_line}"
+            "To adapt your training properly, tell me:\n"
+            "- How long has this been going on?\n"
+            "- Which movements or exercises make it worse?\n"
+            "- What did your doctor or physio say you *can* do right now?\n\n"
+            "Once you answer these, you can say something like:\n"
+            "“Now build me a 6-week plan for fat loss at home, beginner, 45 minutes, "
+            "and adapt it for my injury.”"
         )
 
-    def _handle_pregnancy(self) -> str:
+    def _handle_pregnancy(self, profile: UserProfile, session: SessionState) -> str:
         return (
-            "Pregnancy training must be conservative and medically safe.\n"
-            "Tell me:\n"
-            "- How many weeks pregnant are you?\n"
-            "- Any medical restrictions your doctor gave you?\n"
-            "- Any symptoms that worry you (bleeding, dizziness, etc.)?"
+            "Thanks for letting me know about pregnancy – we’ll keep everything conservative.\n"
+            "Please tell me:\n"
+            "- How many weeks pregnant you are\n"
+            "- Any specific medical restrictions you’ve been given\n"
+            "- Whether you exercised regularly before pregnancy\n"
         )
 
-    def _handle_cycle(self) -> str:
+    def _handle_cycle(self, profile: UserProfile, session: SessionState) -> str:
         return (
-            "Cycle-aware training can help you feel and perform better.\n"
-            "Tell me:\n"
-            "- Your current phase (menstrual, follicular, ovulatory, luteal), if you know it.\n"
-            "- Rough cycle day (e.g. day 3 of bleeding, day 14, etc.)."
+            "Cycle-aware training can absolutely help.\n"
+            "Please tell me:\n"
+            "- Your current phase (menstrual, follicular, ovulatory, luteal)\n"
+            "- Approximate cycle day (if you track it)\n"
+            "- Whether you usually feel low-energy or high-energy in this phase\n"
         )
 
     # ================= UTILITIES =================
 
     def _missing_fields(self, session: SessionState) -> List[str]:
-        """
-        Return list of required fields that are still missing
-        from the session.feature_params dict.
-        """
         return [
-            f
-            for f in self.REQUIRED_PLAN_FIELDS
-            if f not in session.feature_params or session.feature_params[f] in (None, "")
+            f for f in self.REQUIRED_PLAN_FIELDS
+            if f not in session.feature_params
         ]
 
     def _ask_for(self, field: str) -> str:
-        """
-        Human-friendly questions for each missing parameter.
-        """
         questions = {
-            "goal": "What is your main goal? (fat loss / muscle gain / maintenance / general health)",
-            "duration_weeks": "How many weeks do you want the plan to last?",
-            "experience": "What is your experience level? (beginner / intermediate / advanced)",
-            "location": "Where will you train most often? (home / gym)",
-            "time_minutes": "How many minutes per session do you realistically have?",
+            "goal": (
+                "What is your main goal right now? "
+                "(fat loss, muscle gain, weight gain, endurance, flexibility, general health)"
+            ),
+            "duration_weeks": "How many weeks do you want this plan to last?",
+            "experience": "What is your training experience level? (beginner, intermediate, advanced)",
+            "location": "Where will you train most of the time? (home or gym)",
+            "time_minutes": "Roughly how many minutes per session do you have? (e.g. 30, 45, 60, 90)",
         }
 
-        return questions.get(field, "Tell me more about your training needs.")
-
-    def _handle_small_talk(self) -> str:
-        return (
-            "I can build multi-week workout plans, quick sessions, or help you adapt training for injury, "
-            "pregnancy, or your menstrual cycle.\n"
-            "For example, you can say:\n"
-            "- \"I want a 6-week fat loss plan at home, beginner, 45 minutes.\"\n"
-            "- \"Give me a 20-minute fat loss workout at home.\"\n"
-            "- \"I have knee pain, help me train around it.\""
+        return questions.get(
+            field,
+            "Tell me a bit more about your training preferences (goal, weeks, location, and time per session).",
         )
 
-
-# %%
-
-
-# %%
-
-
-
+    def _handle_small_talk(self, profile: UserProfile, session: SessionState) -> str:
+        """
+        Default fallback when we don't have a clear structured request.
+        """
+        return (
+            "I’m your training coach – I can:\n"
+            "- Build multi-week plans (fat loss, muscle gain, endurance, general health)\n"
+            "- Give quick workouts for when you’re short on time\n"
+            "- Adapt training around injuries, pregnancy, or your cycle\n\n"
+            "To get started, tell me something like:\n"
+            "- “6-week fat loss plan, beginner, home, 45 minutes.”\n"
+            "- “20-minute workout for fat loss at home.”\n"
+            "- “I have knee pain and I want to keep training safely.”"
+        )

@@ -1,0 +1,26 @@
+{
+  "user_id": "testing_cli",
+  "name": null,
+  "age": null,
+  "sex": null,
+  "height_cm": null,
+  "weight_kg": null,
+  "goal": null,
+  "duration_weeks": null,
+  "location": null,
+  "time_minutes": null,
+  "experience": null,
+  "injury": null,
+  "pregnant": null,
+  "cycle_phase": null,
+  "equipment": null,
+  "injury_region": "back",
+  "injury_severity": "yellow",
+  "injury_status": {
+    "region": "back",
+    "severity": "yellow",
+    "description": "when i workout and stress my lowerback its 7 and yes it was diagnosed by a doctor"
+  },
+  "last_updated": "2026-02-04T10:45:04.441265",
+  "extras": {}
+}
