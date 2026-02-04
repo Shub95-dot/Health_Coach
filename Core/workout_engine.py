@@ -1,11 +1,9 @@
-import json
-import os
 import re
-import uuid
-from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
-from app.Core.injury_adaptation import InjuryAdaptationEngine
+
+from injury_adaptation import InjuryAdaptationEngine
+
 
 GOALS = {"fat loss", "muscle gain", "weight gain", "endurance", "flexibility", "general health"}
 DURATIONS = {4, 8, 16, 24, 32}
@@ -13,70 +11,90 @@ LOCATIONS = {"home", "gym"}
 EXPERIENCE_LEVELS = {"beginner", "intermediate", "advanced"}
 MENSTRUAL_PHASES = {"menstrual", "follicular", "ovulatory", "luteal"}
 
-class HealthCalculator:
 
-    def calculate_bmi(weight_kg, height_cm):
+
+# Health / Calculation helpers
+
+
+class HealthCalculator:
+    @staticmethod
+    def calculate_bmi(weight_kg: Optional[float], height_cm: Optional[float]) -> float:
         if not weight_kg or not height_cm:
             return 22.0
-        height_m = height_cm/100
+        height_m = height_cm / 100.0
         return weight_kg / (height_m ** 2)
-    
-    def get_bmi_category(bmi):
+
+    @staticmethod
+    def get_bmi_category(bmi: float) -> str:
         if bmi < 18.5:
             return "Underweight"
-        elif bmi <= 25 and bmi >18.5:
+        elif 18.5 <= bmi <= 25:
             return "Normal"
-        elif bmi > 25 and bmi <= 30:
+        elif 25 < bmi <= 30:
             return "Overweight"
         else:
             return "Obese"
-    
-    def estimate_max_hr(age):
+
+    @staticmethod
+    def estimate_max_hr(age: Optional[int]) -> int:
         return 220 - age if age else 190
-    
-    def estimate_hr_zones(age):
+
+    @staticmethod
+    def estimate_hr_zones(age: Optional[int]) -> Dict[str, str]:
         max_hr = HealthCalculator.estimate_max_hr(age)
         return {
             "Zone 1 (Recovery)": f"{int(max_hr * 0.5)}-{int(max_hr * 0.6)} bpm",
             "Zone 2 (Fat Burn)": f"{int(max_hr * 0.6)}-{int(max_hr * 0.7)} bpm",
             "Zone 3 (Aerobic)": f"{int(max_hr * 0.7)}-{int(max_hr * 0.8)} bpm",
-            "Zone 4 (Max)": f"{int(max_hr * 0.9)}-{max_hr} bpm"
+            "Zone 4 (Max)": f"{int(max_hr * 0.9)}-{max_hr} bpm",
         }
-        
-    def estimate_bmr(weight_kg, height_cm, age, gender):
+
+    @staticmethod
+    def estimate_bmr(weight_kg: Optional[float],
+                     height_cm: Optional[float],
+                     age: Optional[int],
+                     gender: Optional[str]) -> float:
         if not all([weight_kg, height_cm, age]):
-            return 1800
-        
-        bmr = 10* weight_kg + 6.25 * height_cm - 5 * age
+            return 1800.0
+
+        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age
         if gender and gender.lower().startswith("m"):
             bmr += 5
         else:
             bmr -= 161
         return bmr
 
-    def estimate_tdee(bmr, experience):
+    @staticmethod
+    def estimate_tdee(bmr: Optional[float], experience: Optional[str]) -> int:
         if not bmr:
             return 2500
-        
+
         multipliers = {
             "beginner": 1.4,
             "intermediate": 1.6,
-            "advanced": 1.8
+            "advanced": 1.8,
         }
         return int(bmr * multipliers.get(experience, 1.5))
-    
-    def get_calorie_target(tdee, goal):
 
+    @staticmethod
+    def get_calorie_target(tdee: int, goal: Optional[str]) -> int:
         adjustments = {
             "fat loss": -500,
             "muscle gain": +300,
             "weight gain": +500,
-            "general health": 0
+            "general health": 0,
         }
-        return tdee + adjustments.get(goal , 0)
+        return tdee + adjustments.get(goal, 0)
+
+
+# ---------------------------------------------------------------------------
+# Optional text parser (currently not wired to dialog)
+# ---------------------------------------------------------------------------
 
 class ProfileParser:
-    
+    """Legacy free-text parser. You can call this if you want extra extraction outside NLU."""
+
+    @staticmethod
     def parse_free_text(message: str) -> Dict[str, Any]:
         profile: Dict[str, Any] = {}
         msg = message.lower()
@@ -102,7 +120,7 @@ class ProfileParser:
         w = re.search(r"(\d{2,3})\s*kg", msg)
         if w:
             profile["weight_kg"] = int(w.group(1))
-        
+
         for level in EXPERIENCE_LEVELS:
             if level in msg:
                 profile["experience"] = level
@@ -136,55 +154,15 @@ class ProfileParser:
                 profile["cycle_phase"] = phase
                 break
 
-        if any(x in msg for x in["injury", "hurt", "pain", "torn", "sprain", "fracture"]):
+        if any(x in msg for x in ["injury", "hurt", "pain", "torn", "sprain", "fracture"]):
             profile["injury"] = message
 
         return profile
 
-class ExerciseSelector:
 
-    def __init__(self, exercise_db: List[Dict[str, Any]]):
-        self.exercises = exercise_db
-
-    def filter_exercise(
-            self,
-            location: str,
-            pregnant: bool,
-            injury: str,
-            experience: str,) -> List[Dict[str, Any]]:
-        filtered = []
-        inj = (injury or "").lower()
-
-        for ex in self.exercises:
-
-            if location == "home" and not ex.get("home_ok", True):
-                continue
-            if location == "gym" and not ex.get("gym_ok", True):
-                continue
-            if pregnant and not ex.get("pregnancy_ok", True):
-                continue
-
-            avoid_if = [a.lower() for a in ex.get("avoid_if", [])]
-            if inj and any(a in inj for a in avoid_if):
-                continue
-
-            level = ex.get("difficulty", "beginner")
-            if experience == "beginner" and level == "advanced":
-                continue
-
-            filtered.append(ex)
-        
-        return filtered
-
-    def select_by_category(
-        self,
-        exercises: List[Dict[str, Any]],
-        category: str,
-        limit: int) -> List[Dict[str, Any]]:
-        selected = [ex for ex in exercises if ex.get("category") == category]
-        if len(selected)> limit:
-            selected = selected[:limit]
-        return selected
+# ---------------------------------------------------------------------------
+# Program structures
+# ---------------------------------------------------------------------------
 
 @dataclass
 class ExercisePrescription:
@@ -195,17 +173,20 @@ class ExercisePrescription:
     rest_seconds: int
     notes: str = ""
 
+
 @dataclass
 class DayPlan:
     day_index: int
     focus: str
     blocks: Dict[str, List[ExercisePrescription]]
 
+
 @dataclass
 class WeekPlan:
     week_index: int
     theme: str
     days: List[DayPlan] = field(default_factory=list)
+
 
 @dataclass
 class ProgramPlan:
@@ -236,20 +217,28 @@ class ProgramPlan:
 
         return "\n".join(lines)
 
+
+# ---------------------------------------------------------------------------
+# Plan generator (multi-week + quick workouts)
+# ---------------------------------------------------------------------------
+
 class PlanGenerator:
-
-    def __init__(self, exercise_db = None):
-
+    def __init__(self, exercise_db: Optional[List[Dict[str, Any]]] = None):
         self.injury_adapter = InjuryAdaptationEngine()
+        self.exercise_db = exercise_db
 
-        self.exercise = exercise_db
+    # -------------- PUBLIC API --------------
 
     def generate_multiweek_plan(self, profile, params: Dict[str, Any]) -> str:
+        """
+        Currently: specialized for fat loss / recomposition.
+        Other goals fall back to a generic message.
+        """
 
-        goal = (params.get("goal") or getattr(profile, "goal", None)or "").lower()
+        goal = (params.get("goal") or getattr(profile, "goal", None) or "").lower()
         duration_weeks = params.get("duration_weeks") or getattr(profile, "duration_weeks", None) or 8
         experience = (params.get("experience") or getattr(profile, "experience", None) or "beginner").lower()
-        location = (params.get("location") or getattr(profile, "location",None) or "home").lower()
+        location = (params.get("location") or getattr(profile, "location", None) or "home").lower()
         time_minutes = params.get("time_minutes") or getattr(profile, "time_minutes", None) or 45
 
         try:
@@ -261,28 +250,27 @@ class PlanGenerator:
         except Exception:
             time_minutes = 45
 
+        # Only fat-loss engine is fully built for now
         if ("loss" in goal) or ("cut" in goal) or ("recomp" in goal) or (goal in {"fat loss", "weight loss"}):
             program = self._build_fat_loss_program(
                 duration_weeks=duration_weeks,
                 experience=experience,
                 location=location,
                 time_minutes=time_minutes,
-                profile=profile
-                )   
-
+                profile=profile,
+            )
             return program.to_text()
-        
-        return(
-            "I can create detailed fat loss programs with full exercise, tempo and rest prescriptions right now."
-            "For other goals (pure strength, competition prep, etc.)"
-            "we will add specialized engines in the next phase"
-        )
-    
-    def generate_quick_workout(self, profile, params: Dict[str, Any]) -> str:
 
+        return (
+            "Right now I create detailed **fat loss / body recomposition** programs with full exercise, tempo, "
+            "and rest prescriptions.\n"
+            "For other goals (pure strength, competition prep, etc.) we’ll add dedicated engines in the next phase."
+        )
+
+    def generate_quick_workout(self, profile, params: Dict[str, Any]) -> str:
         goal = (params.get("goal") or getattr(profile, "goal", None) or "").lower()
         time_minutes = params.get("time_minutes") or getattr(profile, "time_minutes", None) or 25
-        location = (params.get("location") or getattr(profile, "location", None)or "home").lower()
+        location = (params.get("location") or getattr(profile, "location", None) or "home").lower()
         experience = (params.get("experience") or getattr(profile, "experience", None) or "beginner").lower()
 
         try:
@@ -290,27 +278,28 @@ class PlanGenerator:
         except Exception:
             time_minutes = 25
 
-        if(not goal) or ("loss" in goal) or ("cut" in goal) or("recomp" in goal):
+        if (not goal) or ("loss" in goal) or ("cut" in goal) or ("recomp" in goal):
             return self._build_fat_loss_quick_workout(
-                time_minutes = time_minutes,
+                time_minutes=time_minutes,
                 experience=experience,
-                location=location
+                location=location,
             )
-        
+
         return (
-            "Here is a general purpose conditioning session."
-            "Once the other goal specific engines are built, I will tailor this more precisely."
+            "Here’s a general conditioning session.\n"
+            "Once I have specialized engines for your exact goal, I’ll tailor it more precisely."
         )
 
+    # -------------- INTERNAL: FAT LOSS PROGRAM --------------
+
     def _build_fat_loss_program(
-            self,
-            duration_weeks: int,
-            experience: str,
-            location: str,
-            time_minutes: int,
-            profile
+        self,
+        duration_weeks: int,
+        experience: str,
+        location: str,
+        time_minutes: int,
+        profile,
     ) -> ProgramPlan:
-        
 
         duration_weeks = max(4, min(duration_weeks, 16))
 
@@ -322,12 +311,12 @@ class PlanGenerator:
             sessions_per_week = 4
 
         program = ProgramPlan(
-            goal = "Fat loss / body recomposition",
-            duration_weeks = duration_weeks,
-            sessions_per_week=sessions_per_week
+            goal="Fat loss / body recomposition",
+            duration_weeks=duration_weeks,
+            sessions_per_week=sessions_per_week,
         )
 
-        for week_idx in range(1 , duration_weeks + 1):
+        for week_idx in range(1, duration_weeks + 1):
             if week_idx <= max(2, duration_weeks // 3):
                 theme = "Foundation: technique, full-body strength, moderate conditioning"
             elif week_idx <= max(4, 2 * duration_weeks // 3):
@@ -336,36 +325,41 @@ class PlanGenerator:
                 theme = "Intensification: intervals and circuits, controlled fatigue"
 
             week = WeekPlan(week_index=week_idx, theme=theme)
+
             for day_idx in range(1, sessions_per_week + 1):
                 day = self._build_fat_loss_day(
-                        week_index=week_idx,
-                        day_index=day_idx,
-                        total_time=time_minutes,
-                        experience=experience,
-                        location=location,
-                        profile=profile
-                    )
+                    week_index=week_idx,
+                    day_index=day_idx,
+                    total_time=time_minutes,
+                    experience=experience,
+                    location=location,
+                    profile=profile,
+                )
                 week.days.append(day)
+
             program.weeks.append(week)
+
         return program
-    
+
     def _build_fat_loss_day(
-            self,
-            week_index: int,
-            day_index: int,
-            total_time: int,
-            experience: str,
-            location: str,
+        self,
+        week_index: int,
+        day_index: int,
+        total_time: int,
+        experience: str,
+        location: str,
+        profile,
     ) -> DayPlan:
-        
 
         focus = "Full body strength + conditioning"
-        blocks: Dict[str, List[ExercisePrescription]]={
+        blocks: Dict[str, List[ExercisePrescription]] = {
             "Warm-up": [],
             "Strength": [],
             "Conditioning": [],
             "Cool-down": [],
         }
+
+        # --- Warm-up ---
         blocks["Warm-up"] = [
             ExercisePrescription(
                 name="Dynamic mobility (hips, shoulders, spine)",
@@ -384,7 +378,8 @@ class PlanGenerator:
                 notes="Stay easy; you should be able to hold a conversation.",
             ),
         ]
-    
+
+        # --- Strength block (base) ---
         if location == "gym":
             strength_exercises = [
                 ExercisePrescription(
@@ -412,7 +407,7 @@ class PlanGenerator:
                     notes="Squeeze shoulder blades, control the return.",
                 ),
             ]
-        else:  
+        else:
             strength_exercises = [
                 ExercisePrescription(
                     name="Squat or split squat (bodyweight or backpack load)",
@@ -439,72 +434,15 @@ class PlanGenerator:
                     notes="Feel hamstrings load on the way down, no rounding.",
                 ),
             ]
-            
-        if getattr(profile, "injury_region", None):
 
-            original = strength_exercises
-
-            names = [ex.name for ex in original]
-
-            adapted_names = self.injury_adapter.modify_exercise_list(
-                names,
-                profile.injury_region
-            )
-
-            adapted_strength = []
-
-            for name in adapted_names:
-
-                match = next((ex for ex in original if ex.name == name), None)
-
-                if match:
-                    adapted_strength.append(match)
-                else:
-                    adapted_strength.append(
-                        ExercisePrescription(
-                            name=name,
-                            sets=3,
-                            reps="10-12",
-                            tempo="controlled",
-                            rest_seconds=60,
-                            notes="Auto-selected joint-friendly alternative."
-                        )
-                    )
-
-            strength_exercises = adapted_strength
+        # --- Injury adaptation on Strength block ---
+        injury_region = getattr(profile, "injury_region", None)
+        if injury_region:
+            strength_exercises = self._adapt_strength_for_injury(strength_exercises, injury_region)
 
         blocks["Strength"] = strength_exercises
-        # Apply injury adaptation
-        if getattr(profile, "injury_region", None):
 
-            names = [ex.name for ex in strength_exercises]
-
-            adapted_names = self._apply_injury_adaptation(names,profile)
-
-            adapted_strength = []
-
-            for ex in strength_exercises:
-                if ex.name in adapted_names:
-                    adapted_strength.append(ex)
-
-            # Add replacements if needed
-            if len(adapted_strength) < len(strength_exercises):
-                for new_name in adapted_names:
-                    if new_name not in [ex.name for ex in adapted_strength]:
-                        adapted_strength.append(
-                            ExercisePrescription(
-                                name=new_name,
-                                sets=3,
-                                reps="10-12",
-                                tempo="controlled",
-                                rest_seconds=60,
-                                notes="Selected as joint-friendly alternative."
-                            )
-                        )
-
-            blocks["Strength"] = adapted_strength
-
-
+        # --- Conditioning ---
         if week_index <= 2:
             conditioning = [
                 ExercisePrescription(
@@ -530,6 +468,7 @@ class PlanGenerator:
 
         blocks["Conditioning"] = conditioning
 
+        # --- Cool-down ---
         blocks["Cool-down"] = [
             ExercisePrescription(
                 name="Walking + breathing drill",
@@ -551,16 +490,14 @@ class PlanGenerator:
 
         return DayPlan(day_index=day_index, focus=focus, blocks=blocks)
 
+    # -------------- INTERNAL: QUICK FAT LOSS SESSION --------------
+
     def _build_fat_loss_quick_workout(
         self,
         time_minutes: int,
         experience: str,
         location: str,
     ) -> str:
-        """
-        Build a single fat loss-oriented session.
-        We return it as text directly (not using ProgramPlan).
-        """
 
         lines: List[str] = []
         lines.append(f"Quick fat loss workout ({time_minutes} minutes, {location}, {experience}):")
@@ -615,26 +552,57 @@ class PlanGenerator:
         lines.append("- 3-5 of these sessions per week is a strong fat loss base when combined with nutrition and sleep.")
 
         return "\n".join(lines)
-    
-    def _apply_injury_adaptation(self, exercises, profile):
 
-        if not profile:
+    # -------------- INTERNAL: Injury adaptation helper --------------
+
+    def _adapt_strength_for_injury(
+        self,
+        exercises: List[ExercisePrescription],
+        region: str,
+    ) -> List[ExercisePrescription]:
+        """
+        Takes the base strength_exercises and returns an adapted list
+        based on injury region using InjuryAdaptationEngine.
+        """
+
+        if not region:
             return exercises
 
-        if not getattr(profile, "injury_region", None):
-            return exercises
+        original = exercises
+        names = [ex.name for ex in original]
 
-        region = profile.injury_region
+        adapted_names = self.injury_adapter.modify_exercise_list(names, region)
 
-        return self.injury_adapter.modify_exercise_list(exercises, region)
+        adapted_strength: List[ExercisePrescription] = []
 
+        # Keep any original prescriptions whose names are still allowed
+        for name in adapted_names:
+            match = next((ex for ex in original if ex.name == name), None)
+            if match:
+                adapted_strength.append(match)
+            else:
+                # New replacement exercise name -> generic prescription
+                adapted_strength.append(
+                    ExercisePrescription(
+                        name=name,
+                        sets=3,
+                        reps="10-12",
+                        tempo="controlled",
+                        rest_seconds=60,
+                        notes="Selected as a joint-friendly alternative.",
+                    )
+                )
+
+        return adapted_strength
+
+
+# ---------------------------------------------------------------------------
+# Nutrition & Sleep helpers
+# ---------------------------------------------------------------------------
 
 class NutritionGuidance:
     """Simple nutrition guidance based on profile and goal."""
-    
-    def __init__(self):
-        pass
-    
+
     def generate(self, profile: Dict[str, Any]) -> str:
         age = profile.get("age") or 30
         weight = profile.get("weight_kg") or 70
@@ -642,38 +610,39 @@ class NutritionGuidance:
         gender = profile.get("gender") or "other"
         goal = profile.get("goal") or "general health"
         experience = profile.get("experience") or "beginner"
-        
+
         bmr = HealthCalculator.estimate_bmr(weight, height, age, gender)
         tdee = HealthCalculator.estimate_tdee(bmr, experience)
         target = HealthCalculator.get_calorie_target(tdee, goal)
-        
+
         return (
             f"Based on your stats, an estimated daily calorie target for **{goal}** is around **{target} kcal**.\n"
             f"- This is based on BMR ~{bmr:.0f} kcal and TDEE ~{tdee} kcal.\n"
             "- For fat loss: focus on protein, fiber, and minimally processed foods.\n"
-            "- For muscle gain: ensure enough total calories and 1.6-2.2g protein/kg bodyweight.\n"
+            "- For muscle gain: ensure enough total calories and 1.6–2.2 g protein/kg bodyweight.\n"
         )
+
 
 class SleepGuidance:
     """Baseline sleep and recovery guidance."""
-    
+
     def generate(self, profile: Dict[str, Any]) -> str:
         age = profile.get("age") or 30
         goal = profile.get("goal") or "general health"
-        
-        lines = []
+
+        lines: List[str] = []
         lines.append("Sleep & Recovery Recommendations")
         lines.append("--------------------------------")
-        lines.append("- Aim for 7-9 hours of quality sleep per night.")
+        lines.append("- Aim for 7–9 hours of quality sleep per night.")
         lines.append("- Keep a consistent sleep and wake time, even on weekends.")
         lines.append("- Make your room dark, cool, and quiet.")
-        lines.append("- Avoid heavy meals and screens in the 1-2 hours before bed.")
-        
+        lines.append("- Avoid heavy meals and screens in the 1–2 hours before bed.")
+
         if age < 25:
-            lines.append("- As a younger adult, your sleep need may be closer to 8-9 hours.")
+            lines.append("- As a younger adult, your sleep need may be closer to 8–9 hours.")
         if "fat loss" in goal:
             lines.append("- Poor sleep makes fat loss harder; prioritizing sleep improves hunger and energy control.")
-        if "muscle" in goal or "strength" in goal:
-            lines.append("- Muscle recovery and strength gains happen at rest - sleep is non-negotiable.")
-        
+        if ("muscle" in goal) or ("strength" in goal):
+            lines.append("- Muscle recovery and strength gains happen at rest — sleep is non-negotiable.")
+
         return "\n".join(lines)

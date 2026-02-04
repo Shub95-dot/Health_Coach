@@ -1,99 +1,70 @@
-from __future__ import annotations
+﻿import re
+from typing import Dict, Any, List
+from schemas import NLUResult
 
-from typing import Optional
-
-from app.Core.nlu import NLU
-from app.Core.memory import MemoryStore
-from app.Core.dialog_manager import DialogManager
-
-from app.Core.exceptions import (
-    ChatbotError,
-    MedicalReferralRequired,
-    MissingParameters,
-    LowConfidenceIntent,
-)
-
-
-class HealthWellnessChatbot:
+class NLU:
     """
-    Enterprise orchestrator.
-    Connects: NLU -> DialogManager -> Planner (via DialogManager)
-    Persists: UserProfile + SessionState via MemoryStore
+    Lightweight, rule-based NLU for:
+    - intent classification
+    - slot extraction (goal, weeks, location, time, experience, injury)
+    - safety flag detection (for medical red flags)
     """
+    def __init__(self) -> None:
+        self.goal_terms = ["fat loss", "lose fat", "weight loss", "muscle gain", "build muscle", "hypertrophy", "strength", "endurance", "flexibility", "recomposition"]
+        self.quick_terms = ["quick", "short", "20 minute", "20-minute", "15 minute", "15-minute", "express"]
+        self.injury_terms = ["injury", "injured", "pain", "hurt", "torn", "tear", "sprain", "strain", "discomfort", "cannot walk", "can't walk", "post surgery", "post-surgery"]
+        self.pregnancy_terms = ["pregnant", "pregnancy", "prenatal", "postnatal", "post-natal"]
+        self.cycle_terms = ["menstrual", "period", "cycle", "follicular", "ovulatory", "luteal", "pms"]
 
-    def __init__(
-        self,
-        memory: Optional[MemoryStore] = None,
-        nlu: Optional[NLU] = None,
-        dialog: Optional[DialogManager] = None,
-    ):
-        self.memory = memory or MemoryStore(base_path="user_data")
-        self.nlu = nlu or NLU()
-        self.dialog = dialog or DialogManager()
+        self.slot_patterns = {
+            "goal": r"(fat loss|lose fat|weight loss|muscle gain|build muscle|hypertrophy|strength|endurance|flexibility|recomposition)",
+            "duration_weeks": r"(\d+)\s*(?:week|weeks|wk)",
+            "experience": r"(beginner|intermediate|advanced)",
+            "location": r"\b(home|gym)\b",
+            "time_minutes": r"(\d+)\s*(?:minutes|min|minute)",
+        }
+        self.injury_pattern = r"(knee|shoulder|back|ankle|wrist|neck|meniscus|acl|rotator cuff|lumbar|disc|tendonitis|tendinitis|sprain|strain|tear|torn|fracture|rupture)"
+        self.red_flag_terms = ["fracture", "broken", "rupture", "dislocation", "post surgery", "post-surgery", "post op", "post-op", "severe pain", "excruciating", "cannot walk", "can't walk", "cannot bear weight", "can't bear weight"]
 
-    def process_message(self, user_id: str, message: str) -> str:
-        message = (message or "").strip()
-        if not message:
-            return "Tell me what you want help with (fat loss, muscle gain, quick workout, injury, pregnancy, cycle)."
+    def parse(self, text: str) -> NLUResult:
+        text = (text or "").strip()
+        lower = text.lower()
+        intent = self._detect_intent(lower)
+        slots = self._extract_slots(lower, original_text=text)
+        safety_flags = self._detect_safety_flags(lower)
+        confidence = 0.9 if intent != "unknown" else 0.4
+        return NLUResult(intent=intent, slots=slots, confidence=confidence, safety_flags=safety_flags)
 
-        # Load state
-        profile = self.memory.load_profile(user_id)
-        session = self.memory.load_session(user_id)
+    def _detect_intent(self, text: str) -> str:
+        if any(term in text for term in self.injury_terms): return "injury_assistance"
+        if any(term in text for term in self.pregnancy_terms): return "pregnancy_modification"
+        if any(term in text for term in self.cycle_terms): return "cycle_modification"
+        if any(term in text for term in self.quick_terms) and ("workout" in text or "session" in text): return "quick_session"
+        has_goal = any(term in text for term in self.goal_terms)
+        has_weeks = bool(re.search(r"\d+\s*(week|weeks|wk)", text))
+        has_plan_words = any(w in text for w in ["plan", "program", "phase", "cycle"])
+        if has_goal and (has_weeks or has_plan_words): return "multi_week_plan"
+        if has_goal: return "multi_week_plan"
+        return "unknown"
 
-        try:
-            # NLU
-            nlu_result = self.nlu.parse(message)
+    def _extract_slots(self, text: str, original_text: str) -> Dict[str, Any]:
+        slots: Dict[str, Any] = {}
+        m = re.search(self.slot_patterns["goal"], text)
+        if m:
+            goal_raw = m.group(1)
+            goal_map = {"lose fat": "fat loss", "weight loss": "fat loss", "build muscle": "muscle gain"}
+            slots["goal"] = goal_map.get(goal_raw, goal_raw)
+        m = re.search(self.slot_patterns["duration_weeks"], text)
+        if m: slots["duration_weeks"] = int(m.group(1))
+        m = re.search(self.slot_patterns["experience"], text)
+        if m: slots["experience"] = m.group(1)
+        m = re.search(self.slot_patterns["location"], text)
+        if m: slots["location"] = m.group(1)
+        m = re.search(self.slot_patterns["time_minutes"], text)
+        if m: slots["time_minutes"] = int(m.group(1))
+        if re.search(self.injury_pattern, text): slots["injury"] = original_text
+        return slots
 
-            # If you want stricter gating, uncomment:
-            # if (not nlu_result.intent) or (nlu_result.confidence < 0.45):
-            #     raise LowConfidenceIntent("NLU confidence too low")
-
-            # Route + generate reply
-            reply = self.dialog.handle(nlu_result=nlu_result, profile=profile, session=session)
-
-            # Persist updated state
-            self.memory.save_profile(profile)
-            self.memory.save_session(user_id, session)
-
-            return reply
-
-        except MedicalReferralRequired as e:
-            # Persist profile/session before responding
-            self.memory.save_profile(profile)
-            self.memory.save_session(user_id, session)
-
-            # Safety-first message
-            return (
-                "Based on what you said, I’m not comfortable giving training advice without medical clearance.\n"
-                "Please seek medical attention or speak to a qualified clinician first.\n"
-                "If you still want help, tell me what a doctor has cleared you to do."
-            )
-
-        except MissingParameters as e:
-            # Persist and ask follow-up (in our dialog manager we usually ask directly,
-            # but keep this boundary for future extensions.)
-            self.memory.save_profile(profile)
-            self.memory.save_session(user_id, session)
-            return "I need a bit more information to build this safely. What’s your goal, weeks, location, and time per session?"
-
-        except LowConfidenceIntent:
-            self.memory.save_profile(profile)
-            self.memory.save_session(user_id, session)
-            return (
-                "I’m not fully sure what you want yet. Try one of these:\n"
-                "- “I want a 6-week fat loss plan at home, beginner, 45 minutes.”\n"
-                "- “Give me a 20-minute quick workout for fat loss at home.”\n"
-                "- “I have knee pain—help me train around it.”"
-            )
-
-        except ChatbotError:
-            # Controlled failures
-            self.memory.save_profile(profile)
-            self.memory.save_session(user_id, session)
-            return "Something went wrong in my coaching logic. Please rephrase your request (goal, weeks, location, time)."
-
-        except Exception:
-            # Unknown failures: do not leak internals
-            self.memory.save_profile(profile)
-            self.memory.save_session(user_id, session)
-            return "I hit an unexpected error. Please try again with: goal, weeks, location, and time per session."
+    def _detect_safety_flags(self, text: str) -> List[str]:
+        if any(term in text for term in self.red_flag_terms): return ["medical"]
+        return []

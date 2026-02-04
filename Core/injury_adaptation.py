@@ -1,14 +1,6 @@
 # %%
-import os
-
-print(os.listdir("../app"))
-print(os.listdir("../app/Core"))
-
-
-
-
-# %%
 from typing import List
+
 
 
 class InjuryAdaptationEngine:
@@ -81,31 +73,9 @@ class InjuryAdaptationEngine:
                 continue
             new_list.append(ex)
 
-        # Add replacements
         new_list.extend(replacements[:2])
 
         return new_list
-
-
-# %%
-from app.Core.injury_adaptation import InjuryAdaptationEngine
-
-engine = InjuryAdaptationEngine()
-
-workout = [
-    "Barbell squat",
-    "Jump squat",
-    "Running intervals",
-    "Leg press"
-]
-
-print(engine.modify_exercise_list(workout, "knee"))
-
-
-# %%
-
-
-# %%
 
 
 
