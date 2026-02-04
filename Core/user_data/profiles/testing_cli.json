@@ -11,16 +11,16 @@
   "time_minutes": null,
   "experience": null,
   "injury": null,
-  "pregnant": null,
-  "cycle_phase": null,
-  "equipment": null,
   "injury_region": "back",
   "injury_severity": "yellow",
   "injury_status": {
     "region": "back",
     "severity": "yellow",
-    "description": "when i workout and stress my lowerback its 7 and yes it was diagnosed by a doctor"
+    "description": "i need a workout but i have back injury so i cannot hyper extend my back. i am looking for muscle building plan"
   },
-  "last_updated": "2026-02-04T10:45:04.441265",
+  "pregnant": null,
+  "cycle_phase": null,
+  "equipment": null,
+  "last_updated": "2026-02-04T14:21:14.521205",
   "extras": {}
 }

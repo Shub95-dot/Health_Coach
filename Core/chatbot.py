@@ -1,4 +1,3 @@
-# %%
 from __future__ import annotations
 
 from typing import Optional
@@ -121,14 +120,14 @@ class HealthWellnessChatbot:
                 "Please rephrase your request with goal, weeks, location, and time per session."
             )
 
-        except Exception:
-            # Unknown / unexpected error — don't leak internals
+        except Exception as e:
+            # TEMPORARY: debug to see the real error
+            import traceback
+            traceback.print_exc()
+
             self.memory.save_profile(profile)
             self.memory.save_session(user_id, session)
-            return (
-                "I hit an unexpected error. "
-                "Try again and include your goal, weeks, location, and time per session."
-            )
 
-
+            # Return debug info so we can see what’s wrong
+            return f"DEBUG ERROR: {type(e).__name__}: {e}"
 

@@ -1,94 +1,95 @@
-# %%
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Optional, Dict, Any, List
 
 
-# ===== NLU & INJURY STRUCTS =====
+# =========================
+# INJURY STATUS
+# =========================
 
 @dataclass
 class InjuryStatus:
     """
-    Structured result from InjuryEngine.classify().
-    region: 'knee', 'shoulder', 'back', etc.
-    severity: 'green', 'yellow', 'red'
-    description: raw user text or a short summary.
+    Output of the InjuryEngine.
+    region: e.g. 'knee', 'shoulder', 'back', ...
+    severity: 'green' | 'yellow' | 'red'
+    description: raw text / brief summary of the problem
     """
     region: str
-    severity: str
+    severity: str      # "green", "yellow", or "red"
     description: str = ""
 
 
-@dataclass
-class NLUResult:
-    """
-    Output of NLU.parse().
-    - intent: high-level string, e.g. 'multi_week_plan', 'injury_assistance'
-    - slots: extracted fields (goal, weeks, location, time, injury text, etc.)
-    - confidence: float, not used heavily yet but could be in future
-    - safety_flags: e.g. ['medical'] for red-flag terms
-    """
-    intent: str
-    slots: Dict[str, Any]
-    confidence: float
-    safety_flags: List[str]
-
-
-# ===== USER PROFILE & SESSION STATE =====
+# =========================
+# USER PROFILE (PERSISTED)
+# =========================
 
 @dataclass
 class UserProfile:
     """
-    Long-term per-user state. Saved by MemoryStore.
-    This is what the coach 'remembers' about a client.
+    Long-lived user record.
+    Persisted by MemoryStore and updated from parsed free text + slots.
     """
     user_id: str
 
+    # Basic demographics
     name: Optional[str] = None
     age: Optional[int] = None
-    sex: Optional[str] = None
-
+    sex: Optional[str] = None               # 'male', 'female', 'other'
     height_cm: Optional[float] = None
     weight_kg: Optional[float] = None
 
-    goal: Optional[str] = None
+    # Training preferences / last request
+    goal: Optional[str] = None              # 'fat loss', 'muscle gain', etc.
     duration_weeks: Optional[int] = None
-    location: Optional[str] = None
+    location: Optional[str] = None          # 'home' or 'gym'
     time_minutes: Optional[int] = None
-    experience: Optional[str] = None
+    experience: Optional[str] = None        # 'beginner' / 'intermediate' / 'advanced'
 
-    injury: Optional[str] = None
-    pregnant: Optional[bool] = None
-    cycle_phase: Optional[str] = None
-    equipment: Optional[str] = None
-
-    # Injury-specific structured fields
-    injury_region: Optional[str] = None
-    injury_severity: Optional[str] = None
+    # Health & constraints
+    injury: Optional[str] = None            # free text from user
+    injury_region: Optional[str] = None     # e.g. 'knee'
+    injury_severity: Optional[str] = None   # 'green' / 'yellow' / 'red'
     injury_status: Optional[InjuryStatus] = None
 
-    last_updated: Optional[str] = None
+    pregnant: Optional[bool] = None
+    cycle_phase: Optional[str] = None       # 'menstrual', 'follicular', etc.
 
-    # Catch-all for extra attributes we might add later
+    equipment: Optional[str] = None         # free text e.g. 'dumbbells, bench'
+
+    last_updated: Optional[str] = None      # ISO timestamp string
+
+    # Anything we parse but don't have a dedicated field for
     extras: Dict[str, Any] = field(default_factory=dict)
 
+
+# =========================
+# SHORT-LIVED SESSION STATE
+# =========================
 
 @dataclass
 class SessionState:
     """
-    Short-term conversational state (per session).
-    Not the client's entire history, just the current flow.
+    Per-conversation context.
+    Not long-term memory: just holds the current flow + collected params.
     """
-    current_flow: Optional[str] = None   # e.g. 'multi_week_plan'
+    user_id: str
+    current_flow: Optional[str] = None          # e.g. 'multi_week_plan'
     feature_params: Dict[str, Any] = field(default_factory=dict)
+    last_intent: Optional[str] = None
+    last_message: Optional[str] = None
 
 
-# ===== GOAL PARAMS FOR PLAN GENERATOR =====
+# =========================
+# GOAL PARAM CONTAINER
+# =========================
 
 @dataclass
 class GoalParams:
     """
-    Cleaned parameter bundle for passing into PlanGenerator.
-    DialogManager will construct this from session.feature_params.
+    Canonical parameter bundle passed to the planner.
+    Typically built from SessionState.feature_params.
     """
     goal: str
     duration_weeks: int
@@ -97,4 +98,17 @@ class GoalParams:
     time_minutes: int
 
 
+# =========================
+# NLU → DIALOG HANDOFF
+# =========================
 
+@dataclass
+class NLUResult:
+    """
+    Output of the NLU component.
+    Parsed intent, slots, confidence, and any safety flags.
+    """
+    intent: str
+    confidence: float
+    slots: Dict[str, Any]
+    safety_flags: List[str] = field(default_factory=list)

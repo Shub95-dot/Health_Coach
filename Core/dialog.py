@@ -1,24 +1,11 @@
 from typing import List
-
 from injury_engine import InjuryEngine
-from schemas import (
-    UserProfile,
-    SessionState,
-    GoalParams,
-    NLUResult,
-)
+from schemas import UserProfile, SessionState, GoalParams, NLUResult
 from exceptions import MedicalReferralRequired
 from workout_engine import PlanGenerator
 
 
 class DialogManager:
-    """
-    Orchestrates high-level conversation:
-      - Uses NLUResult (intent, slots, safety_flags)
-      - Maintains SessionState.current_flow
-      - Calls PlanGenerator for multi-week plans
-      - Integrates InjuryEngine for injury region + severity
-    """
 
     REQUIRED_PLAN_FIELDS = [
         "goal",
@@ -32,116 +19,196 @@ class DialogManager:
         self.planner = PlanGenerator()
         self.injury_engine = InjuryEngine()
 
-    # ================= MAIN ENTRY =================
-
     def handle(self, nlu_result: NLUResult, profile: UserProfile, session: SessionState) -> str:
-        """
-        Main routing method called by HealthWellnessChatbot.
-        """
-
-        # ===== 1) SAFETY FROM NLU RED FLAGS =====
+        # ===== SAFETY FIRST (from NLU) =====
         if nlu_result.safety_flags:
             raise MedicalReferralRequired(
-                f"Safety flags detected in your message ({', '.join(nlu_result.safety_flags)})."
+                f"Safety flags detected: {', '.join(nlu_result.safety_flags)}"
             )
 
-        # ===== 2) INJURY CLASSIFICATION (IF PRESENT) =====
-        injury_status = None
-        injury_text = nlu_result.slots.get("injury")
-
-        if injury_text:
+        # ===== INJURY CLASSIFICATION =====
+        if "injury" in nlu_result.slots:
+            injury_text = nlu_result.slots["injury"]
             injury_status = self.injury_engine.classify(injury_text)
 
-            # Persist on profile
             profile.injury_status = injury_status
             profile.injury_region = injury_status.region
             profile.injury_severity = injury_status.severity
 
-        # Hard stop for "red" injuries detected by InjuryEngine
-        if injury_status and injury_status.severity == "red":
-            raise MedicalReferralRequired(
-                "This may be a serious injury (red-flag). "
-                "Please consult a medical professional before continuing training."
-            )
+            # HARD STOP for red injuries (ONLY if we actually have an injury)
+            if injury_status.severity == "red":
+                raise MedicalReferralRequired(
+                    "This may be a serious injury. Please consult a medical professional before training."
+                )
 
-        # ===== 3) MERGE SLOTS INTO SESSION FEATURE PARAMS =====
-        # (We accumulate info over multiple turns.)
+        # ===== MERGE SLOTS INTO SESSION =====
         for k, v in nlu_result.slots.items():
             session.feature_params[k] = v
 
         intent = nlu_result.intent
 
-        # ===== 4) FLOW OVERRIDE: CONTINUE EXISTING FLOW ON UNKNOWN =====
-        # If NLU can't confidently assign a new intent, but we are already in a flow,
-        # treat the message as continuation of that flow instead of falling back to small talk.
-        if intent == "unknown" and session.current_flow:
-            intent = session.current_flow
-
-        # ===== 5) ROUTING BY INTENT =====
-
         if intent == "multi_week_plan":
-            session.current_flow = "multi_week_plan"
             return self._handle_multi_week_plan(profile, session)
-        
-        if intent == "quick_session":
-            session.current_flow = "quick_session"
-            return self._handle_quick_session(profile, session)
-
 
         if intent == "injury_assistance":
-            session.current_flow = "injury_assistance"
-            return self._handle_injury(profile, session)
+            return self._handle_injury()
 
         if intent == "pregnancy_modification":
-            session.current_flow = "pregnancy_modification"
-            return self._handle_pregnancy(profile, session)
+            return self._handle_pregnancy()
 
         if intent == "cycle_modification":
-            session.current_flow = "cycle_modification"
-            return self._handle_cycle(profile, session)
+            return self._handle_cycle()
 
-        # Fallback: generic “what do you want help with?”
-        session.current_flow = None
+        # Unknown / small talk fallback
         return self._handle_small_talk(profile, session)
+    
+    #Smart Helper#
+        
+    def _normalize_duration_weeks(self, goal: str, requested_weeks: int) -> int:
+        """
+        Map arbitrary requested weeks (3, 5, 7, 11, ...) to a sensible
+        program length depending on goal.
+
+        This is where you encode "coach logic" instead of rigid enums.
+        """
+
+        g = (goal or "").lower().strip()
+
+        # Default ranges per goal – you can tweak these
+        if "fat" in g or "loss" in g or "cut" in g or "recomp" in g:
+            # Fat loss / recomposition – we like 6–12 weeks
+            if requested_weeks <= 3:
+                return 4          # minimum meaningful block
+            elif requested_weeks <= 5:
+                return 6
+            elif requested_weeks <= 7:
+                return 8
+            elif requested_weeks <= 10:
+                return 10
+            elif requested_weeks <= 12:
+                return 12
+            else:
+                return 12         # cap to 12 for now
+
+        if "muscle" in g or "hypertrophy" in g:
+            # Muscle gain takes longer – bias toward 8–16
+            if requested_weeks <= 4:
+                return 8
+            elif requested_weeks <= 7:
+                return 8
+            elif requested_weeks <= 10:
+                return 12
+            elif requested_weeks <= 16:
+                return 16
+            else:
+                return 16
+
+        # General health / endurance / flexibility, etc.
+        # More forgiving, but still normalised.
+        if requested_weeks <= 3:
+            return 4
+        elif requested_weeks <= 6:
+            return 6
+        elif requested_weeks <= 8:
+            return 8
+        elif requested_weeks <= 12:
+            return 12
+        else:
+            return 12
+
+
 
     # ================= PLAN FLOW =================
 
     def _handle_multi_week_plan(self, profile: UserProfile, session: SessionState) -> str:
-        """
-        Build or continue building a multi-week plan request.
-        If required fields are missing, ask a targeted follow-up.
-        """
+        # 1) Check what we still need
         missing = self._missing_fields(session)
 
         if missing:
-            # Stay in this flow and ask for the next missing parameter
-            field = missing[0]
-            return self._ask_for(field)
+            session.current_flow = "multi_week_plan"
+            return self._ask_for(missing[0])
 
-        # All required fields present → construct GoalParams
+        # 2) Build params object from session slots
+        raw_goal = session.feature_params.get("goal", "")
+        raw_duration = session.feature_params.get("duration_weeks", 8)
+        raw_experience = session.feature_params.get("experience", "beginner")
+        raw_location = session.feature_params.get("location", "home")
+        raw_time = session.feature_params.get("time_minutes", 45)
+
+        try:
+            requested_weeks = int(raw_duration)
+        except Exception:
+            requested_weeks = 8  # fallback
+
+        # 3) Normalise weeks based on goal (THIS is the new logic)
+        recommended_weeks = self._normalize_duration_weeks(raw_goal, requested_weeks)
+
         params = GoalParams(
-            goal=session.feature_params["goal"],
-            duration_weeks=int(session.feature_params["duration_weeks"]),
-            experience=session.feature_params["experience"],
-            location=session.feature_params["location"],
-            time_minutes=int(session.feature_params["time_minutes"]),
+            goal=raw_goal,
+            duration_weeks=recommended_weeks,
+            experience=raw_experience,
+            location=raw_location,
+            time_minutes=raw_time
         )
 
-        # Persist into profile memory
+        # 4) Save into profile memory
         profile.goal = params.goal
         profile.duration_weeks = params.duration_weeks
         profile.experience = params.experience
         profile.location = params.location
         profile.time_minutes = params.time_minutes
 
-        # If we have injury info on profile, PlanGenerator will adapt around it
+        # 5) Generate plan
         plan_text = self.planner.generate_multiweek_plan(profile, params.__dict__)
 
-        # Reset flow after completing the plan
+        # 6) Reset session
         session.current_flow = None
         session.feature_params.clear()
 
+        # 7) If we changed the duration, explain it to the user
+        if recommended_weeks != requested_weeks:
+            prefix = (
+                f"You asked for a **{requested_weeks}-week** plan.\n"
+                f"For **{params.goal}**, I recommend **{recommended_weeks} weeks**, "
+                f"so I’ve built a {recommended_weeks}-week program for you.\n\n"
+            )
+            return prefix + plan_text
+
+        # If they already asked for a sensible duration, just return the plan
         return plan_text
+
+    def _handle_quick_session(self, profile: UserProfile, session: SessionState) -> str:
+        """
+        Build a single quick workout based on whatever slots we have.
+        This uses PlanGenerator.generate_quick_workout().
+        """
+
+        
+        params = dict(session.feature_params)
+
+        
+        if "goal" not in params and profile.goal:
+            params["goal"] = profile.goal
+
+        if "location" not in params and profile.location:
+            params["location"] = profile.location
+
+        if "time_minutes" not in params and profile.time_minutes:
+            params["time_minutes"] = profile.time_minutes
+
+        if "experience" not in params and profile.experience:
+            params["experience"] = profile.experience
+
+      
+        params.setdefault("goal", "fat loss")
+        params.setdefault("location", "home")
+        params.setdefault("time_minutes", 20)
+        params.setdefault("experience", "beginner")
+
+        # Call the workout engine
+        text = self.planner.generate_quick_workout(profile, params)
+        return text
+
     
     def _handle_quick_session(self, profile: UserProfile, session: SessionState) -> str:
         """
@@ -248,7 +315,7 @@ class DialogManager:
         Default fallback when we don't have a clear structured request.
         """
         return (
-            "I’m your training coach – I can:\n"
+            "Hi!!\nI’m your training coach – I can:\n"
             "- Build multi-week plans (fat loss, muscle gain, endurance, general health)\n"
             "- Give quick workouts for when you’re short on time\n"
             "- Adapt training around injuries, pregnancy, or your cycle\n\n"
