@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from nlu import NLU
 from memory import MemoryStore
 from dialog import DialogManager
+from pdf_generator import WorkoutPDFGenerator
 
 from exceptions import (
     ChatbotError,
@@ -17,12 +18,6 @@ from exceptions import (
 class HealthWellnessChatbot:
     """
     Top-level orchestrator.
-
-    Responsibilities:
-    - Load / save user profile + session via MemoryStore
-    - Call NLU.parse(message) to get NLUResult
-    - Pass NLUResult + Profile + Session to DialogManager
-    - Handle safety / error exceptions and turn them into user-friendly text
     """
 
     def __init__(
@@ -31,41 +26,29 @@ class HealthWellnessChatbot:
         nlu: Optional[NLU] = None,
         dialog: Optional[DialogManager] = None,
     ) -> None:
-        # Use provided dependencies if passed in (for future tests),
-        # otherwise construct the defaults.
         self.memory = memory or MemoryStore()
         self.nlu = nlu or NLU()
         self.dialog = dialog or DialogManager()
+        self.pdf_generator = WorkoutPDFGenerator()
 
-    def process_message(self, user_id: str, message: str) -> str:
+    def process_message(self, user_id: str, message: str) -> Dict[str, Any]:
         """
-        Main external API.
-
-        - user_id: stable id for the user (e.g. "cli_user", auth id, etc.)
-        - message: raw user text.
-        Returns: reply string to send back to the user.
+        Main external API. Returns a dict with 'reply' and optional 'pdf_path'.
         """
 
         message = (message or "").strip()
         if not message:
-            return (
-                "Tell me what you want help with "
-                "(fat loss, muscle gain, quick workout, injury, pregnancy, cycle)."
-            )
+            return {
+                "reply": "Tell me what you want help with (fat loss, muscle gain, quick workout)."
+            }
 
         # ---- Load state ----
         profile = self.memory.load_profile(user_id)
-        # NOTE: we will make sure MemoryStore has load_session/save_session;
-        # for now we assume they exist and return a SessionState.
         session = self.memory.load_session(user_id)
 
         try:
             # ---- NLU step ----
             nlu_result = self.nlu.parse(message)
-
-            # Optional stricter gating in future:
-            # if (not nlu_result.intent) or (nlu_result.confidence < 0.45):
-            #     raise LowConfidenceIntent("NLU confidence too low")
 
             # ---- Dialog / planning step ----
             reply = self.dialog.handle(
@@ -78,56 +61,31 @@ class HealthWellnessChatbot:
             self.memory.save_profile(profile)
             self.memory.save_session(user_id, session)
 
-            return reply
+            # ---- PDF Generation Trigger ----
+            # If the reply looks like a plan, generate PDF
+            r_lower = reply.lower()
+            pdf_path = None
+            if ("week" in r_lower and "plan" in r_lower) or ("goal:" in r_lower and "week " in r_lower):
+                stats_text = self.dialog._get_health_stats_text(profile)
+                pdf_path = self.pdf_generator.generate(
+                    user_id=user_id,
+                    profile_name=profile.name or "User",
+                    stats_text=stats_text,
+                    plan_text=reply
+                )
+
+            return {"reply": reply, "pdf_path": pdf_path}
 
         except MedicalReferralRequired:
-            # Safety-first; persist state, then give conservative answer.
             self.memory.save_profile(profile)
             self.memory.save_session(user_id, session)
-            return (
-                "Based on what you said, I'm not comfortable giving training advice "
-                "without medical clearance.\n"
-                "Please seek medical attention or speak to a qualified clinician first.\n"
-                "If you still want help, tell me what a doctor has cleared you to do."
-            )
-
-        except MissingParameters:
-            # In our current design, DialogManager usually asks follow-up questions
-            # itself, but we keep this here as a guard.
-            self.memory.save_profile(profile)
-            self.memory.save_session(user_id, session)
-            return (
-                "I need a bit more information to build this safely. "
-                "What’s your goal, weeks, location, and time per session?"
-            )
-
-        except LowConfidenceIntent:
-            self.memory.save_profile(profile)
-            self.memory.save_session(user_id, session)
-            return (
-                "I'm not fully sure what you want yet. Try one of these:\n"
-                "- \"I want a 6-week fat loss plan at home, beginner, 45 minutes.\"\n"
-                "- \"Give me a 20-minute quick workout for fat loss at home.\"\n"
-                "- \"I have knee pain—help me train around it.\""
-            )
-
-        except ChatbotError:
-            # Controlled “logic” failures in our own code
-            self.memory.save_profile(profile)
-            self.memory.save_session(user_id, session)
-            return (
-                "Something went wrong in my coaching logic. "
-                "Please rephrase your request with goal, weeks, location, and time per session."
-            )
-
+            return {
+                "reply": "Based on what you said, I'm not comfortable giving training advice without medical clearance.\nPlease seek medical attention first."
+            }
         except Exception as e:
-            # TEMPORARY: debug to see the real error
             import traceback
             traceback.print_exc()
-
             self.memory.save_profile(profile)
             self.memory.save_session(user_id, session)
-
-            # Return debug info so we can see what’s wrong
-            return f"DEBUG ERROR: {type(e).__name__}: {e}"
+            return {"reply": f"DEBUG ERROR: {type(e).__name__}: {e}"}
 

@@ -58,7 +58,7 @@ class HealthCalculator:
             return 1800.0
 
         bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age
-        if gender and gender.lower().startswith("m"):
+        if gender and str(gender).lower().startswith("m"):
             bmr += 5
         else:
             bmr -= 161

@@ -111,4 +111,5 @@ class NLUResult:
     intent: str
     confidence: float
     slots: Dict[str, Any]
+    original_text: str = ""
     safety_flags: List[str] = field(default_factory=list)

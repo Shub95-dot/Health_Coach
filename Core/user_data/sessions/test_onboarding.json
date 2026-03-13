@@ -1,0 +1,12 @@
+{
+  "user_id": "test_onboarding",
+  "current_flow": "multi_week_plan",
+  "feature_params": {
+    "goal": "fat loss",
+    "experience": "beginner",
+    "location": "home",
+    "_last_asked": "duration_weeks"
+  },
+  "last_intent": "multi_week_plan",
+  "last_message": null
+}

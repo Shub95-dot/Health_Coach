@@ -1,0 +1,22 @@
+{
+  "user_id": "streamlit_user",
+  "name": null,
+  "age": null,
+  "sex": null,
+  "height_cm": null,
+  "weight_kg": null,
+  "goal": "fat loss",
+  "duration_weeks": 6,
+  "location": "home",
+  "time_minutes": 20,
+  "experience": "advanced",
+  "injury": null,
+  "injury_region": null,
+  "injury_severity": null,
+  "injury_status": null,
+  "pregnant": null,
+  "cycle_phase": null,
+  "equipment": null,
+  "last_updated": "2026-03-10T19:42:30.530547",
+  "extras": {}
+}

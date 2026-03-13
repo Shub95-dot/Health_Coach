@@ -1,0 +1,9 @@
+{
+  "user_id": "streamlit_user",
+  "current_flow": "onboarding",
+  "feature_params": {
+    "_last_asked_onboarding": "name"
+  },
+  "last_intent": null,
+  "last_message": null
+}

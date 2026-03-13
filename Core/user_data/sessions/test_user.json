@@ -1,0 +1,13 @@
+{
+  "user_id": "test_user",
+  "current_flow": "multi_week_plan",
+  "feature_params": {
+    "location": "gym",
+    "experience": "intermediate",
+    "time_minutes": 60,
+    "goal": "muscle gain",
+    "_last_asked": "duration_weeks"
+  },
+  "last_intent": "multi_week_plan",
+  "last_message": null
+}

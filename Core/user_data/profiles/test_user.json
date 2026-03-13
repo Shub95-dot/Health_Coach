@@ -1,0 +1,26 @@
+{
+  "user_id": "test_user",
+  "name": null,
+  "age": null,
+  "sex": null,
+  "height_cm": null,
+  "weight_kg": null,
+  "goal": "fat loss",
+  "duration_weeks": 10,
+  "location": "home",
+  "time_minutes": 60,
+  "experience": "beginner",
+  "injury": null,
+  "injury_region": "knee",
+  "injury_severity": "yellow",
+  "injury_status": {
+    "region": "knee",
+    "severity": "yellow",
+    "description": "i have knee pain and i want to keep training safely."
+  },
+  "pregnant": null,
+  "cycle_phase": null,
+  "equipment": null,
+  "last_updated": "2026-03-10T14:53:59.717602",
+  "extras": {}
+}

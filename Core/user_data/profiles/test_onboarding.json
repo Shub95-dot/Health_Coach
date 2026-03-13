@@ -1,0 +1,22 @@
+{
+  "user_id": "test_onboarding",
+  "name": "Shubham",
+  "age": 28,
+  "sex": "male",
+  "height_cm": 180.0,
+  "weight_kg": 85.0,
+  "goal": "fat loss",
+  "duration_weeks": 10,
+  "location": "home",
+  "time_minutes": 45,
+  "experience": "beginner",
+  "injury": null,
+  "injury_region": null,
+  "injury_severity": null,
+  "injury_status": null,
+  "pregnant": null,
+  "cycle_phase": null,
+  "equipment": null,
+  "last_updated": "2026-03-10T19:17:08.373953",
+  "extras": {}
+}
