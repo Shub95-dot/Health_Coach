@@ -358,8 +358,8 @@ See LICENSE file for details.
 
 For issues, questions, or contributions:
 - Open an issue on GitHub
-- Contact: [your-email]
-- Documentation: [link]
+- Contact: [shirodkarshubham9@gmail.com]
+
 
 ## ⚠️ Disclaimer
 
