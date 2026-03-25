@@ -1,0 +1,19 @@
+{
+  "user_id": "shubham",
+  "name": "Shubham",
+  "age": 30,
+  "sex": "male",
+  "height_cm": 182.02,
+  "weight_kg": 75.0,
+  "goal": "muscle gain",
+  "duration_weeks": null,
+  "experience": "advanced",
+  "location": "gym",
+  "time_minutes": null,
+  "injury_region": null,
+  "injury_severity": null,
+  "injury_description": null,
+  "last_updated": "2026-03-12T07:00:37.510642",
+  "conversation_count": 5,
+  "chat_history": []
+}

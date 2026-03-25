@@ -1,0 +1,18 @@
+{
+  "user_id": "shubham_user_dev",
+  "name": null,
+  "age": null,
+  "sex": null,
+  "height_cm": null,
+  "weight_kg": null,
+  "goal": null,
+  "duration_weeks": null,
+  "experience": null,
+  "location": null,
+  "time_minutes": null,
+  "injury_region": null,
+  "injury_severity": null,
+  "injury_description": null,
+  "last_updated": "2026-03-12T06:13:31.479119",
+  "conversation_count": 2
+}

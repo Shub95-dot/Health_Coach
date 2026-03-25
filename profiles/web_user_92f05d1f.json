@@ -1,0 +1,18 @@
+{
+  "user_id": "web_user_92f05d1f",
+  "name": null,
+  "age": null,
+  "sex": null,
+  "height_cm": null,
+  "weight_kg": null,
+  "goal": "strength",
+  "duration_weeks": null,
+  "experience": null,
+  "location": null,
+  "time_minutes": null,
+  "injury_region": null,
+  "injury_severity": null,
+  "injury_description": null,
+  "last_updated": "2026-03-12T06:01:05.266350",
+  "conversation_count": 6
+}

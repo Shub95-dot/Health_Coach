@@ -1,0 +1,39 @@
+# Health & Fitness Chatbot - Requirements
+
+# Core Python (3.10+)
+# No external ML frameworks needed for rule-based version
+
+# Optional: If you want to add ML-based NLU later
+# tensorflow>=2.10.0
+# scikit-learn>=1.0.0
+# numpy>=1.23.0
+# pandas>=1.5.0
+
+# For testing
+pytest>=7.0.0
+pytest-cov>=3.0.0
+
+# For code quality
+black>=22.0.0
+flake8>=5.0.0
+mypy>=0.990
+
+# For API (if deploying as web service)
+# fastapi>=0.100.0
+# uvicorn>=0.23.0
+# pydantic>=2.0.0
+
+# For database (if migrating from JSON)
+# sqlalchemy>=2.0.0
+# alembic>=1.11.0
+
+# For deployment
+# gunicorn>=21.0.0
+# python-dotenv>=1.0.0
+
+# Current core dependencies (minimal)
+dataclasses>=0.6  # For Python <3.7 compatibility
+typing>=3.7.4  # Built-in for Python 3.5+
+streamlit
+ollama
+python-dotenv
