@@ -1,5 +1,5 @@
 # Health & Fitness AI Chatbot
-
+UNDER DEVELOPMENT 
 An intelligent, personalized health and fitness coaching chatbot that creates customized workout plans, handles injuries safely, and adapts to individual user needs.
 
 ## 🌟 Features
